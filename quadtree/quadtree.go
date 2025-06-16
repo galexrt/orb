@@ -118,8 +118,22 @@ func (q *Quadtree) add(n *node, p orb.Pointer, point orb.Point, left, right, bot
 //		return pointer.(*MyType).ID == lookingFor.ID
 //	}
 func (q *Quadtree) Remove(p orb.Pointer, eq FilterFunc) bool {
+	if q.root == nil {
+		return false
+	}
+
+	var point orb.Point
+	usePoint := true
+	if p != nil {
+		point = p.Point()
+	} else {
+		usePoint = false
+	}
 	if eq == nil {
-		point := p.Point()
+		if !usePoint {
+			// Can't remove without a point or filter
+			return false
+		}
 		eq = func(pointer orb.Pointer) bool {
 			return point.Equal(pointer.Point())
 		}
@@ -127,10 +141,11 @@ func (q *Quadtree) Remove(p orb.Pointer, eq FilterFunc) bool {
 
 	b := q.bound
 	v := &findVisitor{
-		point:          p.Point(),
+		point:          point,
 		filter:         eq,
 		closestBound:   &b,
 		minDistSquared: math.MaxFloat64,
+		usePoint:       usePoint,
 	}
 
 	newVisit(v).Visit(q.root,
@@ -199,17 +214,28 @@ func (q *Quadtree) Find(p orb.Point) orb.Pointer {
 // Matching returns the closest Value/Pointer in the quadtree for which
 // the given filter function returns true. This function is thread safe.
 // Multiple goroutines can read from a pre-created tree.
-func (q *Quadtree) Matching(p orb.Point, f FilterFunc) orb.Pointer {
+func (q *Quadtree) Matching(p orb.Pointer, f FilterFunc) orb.Pointer {
 	if q.root == nil {
 		return nil
 	}
 
 	b := q.bound
+	usePoint := true
+	var point orb.Point
+	if p != nil {
+		point = p.Point()
+	} else {
+		usePoint = false
+	}
+	if f != nil && p == nil {
+		usePoint = false
+	}
 	v := &findVisitor{
-		point:          p,
+		point:          point,
 		filter:         f,
 		closestBound:   &b,
 		minDistSquared: math.MaxFloat64,
+		usePoint:       usePoint,
 	}
 
 	newVisit(v).Visit(q.root,
@@ -395,6 +421,7 @@ type findVisitor struct {
 	closest        *node
 	closestBound   *orb.Bound
 	minDistSquared float64
+	usePoint       bool
 }
 
 func (v *findVisitor) Bound() *orb.Bound {
@@ -408,6 +435,13 @@ func (v *findVisitor) Point() orb.Point {
 func (v *findVisitor) Visit(n *node) {
 	// skip this pointer if we have a filter and it doesn't match
 	if v.filter != nil && !v.filter(n.Value) {
+		return
+	}
+
+	if !v.usePoint {
+		// No point, just use filter
+		v.closest = n
+		v.minDistSquared = 0
 		return
 	}
 
@@ -535,7 +569,6 @@ func (v *inBoundVisitor) Visit(n *node) {
 	if v.bound.Min[0] > p[0] || v.bound.Max[0] < p[0] ||
 		v.bound.Min[1] > p[1] || v.bound.Max[1] < p[1] {
 		return
-
 	}
 	v.pointers = append(v.pointers, n.Value)
 }
